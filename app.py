@@ -22,7 +22,7 @@ def load_cnn_model():
     if not os.path.exists(model_path):
         st.error("Model file not found! Make sure digit_alpha_model.keras is in the folder.")
         st.stop()
-    return load_model(model_path)
+    return load_model(model_path, compile=False)
 
 model = load_cnn_model()
 
