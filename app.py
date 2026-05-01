@@ -137,52 +137,49 @@ def preprocess(img_array):
     else:
         gray = img_array.copy()
 
-    gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
-    denoised = cv2.bilateralFilter(gray, 7, 50, 50)
-    blur = cv2.GaussianBlur(denoised, (5, 5), 0)
+    def remove_border_components(binary, min_area_ratio=0.002):
+        h, w = binary.shape
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        min_area = h * w * min_area_ratio
+        cleaned_mask = np.zeros_like(binary)
+        for i in range(1, num_labels):
+            x, y, bw, bh, area = stats[i]
+            if area < min_area:
+                continue
+            if x <= 1 or y <= 1 or (x + bw) >= (w - 1) or (y + bh) >= (h - 1):
+                continue
+            cleaned_mask[labels == i] = 255
+        if np.count_nonzero(cleaned_mask) == 0:
+            return binary
+        return cleaned_mask
 
-    adaptive = cv2.adaptiveThreshold(
-        blur,
+    denoised = cv2.GaussianBlur(gray, (5, 5), 0)
+    thresh = cv2.adaptiveThreshold(
+        denoised,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
+        cv2.THRESH_BINARY_INV,
         31,
-        10
+        12
     )
 
-    if np.mean(adaptive) > 127:
-        adaptive = cv2.bitwise_not(adaptive)
-
-    white_ratio = np.mean(adaptive > 0)
-    if white_ratio < 0.01 or white_ratio > 0.95:
-        _, otsu = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        if np.mean(otsu) > 127:
-            otsu = cv2.bitwise_not(otsu)
-        binary = otsu
-    else:
-        binary = adaptive
-
-    binary[:2, :] = 0
-    binary[-2:, :] = 0
-    binary[:, :2] = 0
-    binary[:, -2:] = 0
-
     kernel = np.ones((3, 3), np.uint8)
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+    cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
     cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=1)
     cleaned = cv2.medianBlur(cleaned, 3)
+    cleaned = remove_border_components(cleaned)
 
     contours, _ = cv2.findContours(cleaned.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
-        min_area = cleaned.size * 0.002
-        filtered = [c for c in contours if cv2.contourArea(c) >= min_area]
-        if not filtered:
-            filtered = contours
+        min_area = cleaned.size * 0.003
+        candidates = [c for c in contours if cv2.contourArea(c) >= min_area]
+        if not candidates:
+            candidates = contours
 
-        x0 = min(cv2.boundingRect(c)[0] for c in filtered)
-        y0 = min(cv2.boundingRect(c)[1] for c in filtered)
-        x1 = max(cv2.boundingRect(c)[0] + cv2.boundingRect(c)[2] for c in filtered)
-        y1 = max(cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3] for c in filtered)
+        x0 = min(cv2.boundingRect(c)[0] for c in candidates)
+        y0 = min(cv2.boundingRect(c)[1] for c in candidates)
+        x1 = max(cv2.boundingRect(c)[0] + cv2.boundingRect(c)[2] for c in candidates)
+        y1 = max(cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3] for c in candidates)
 
         pad = int(0.18 * max(x1 - x0, y1 - y0))
         x0 = max(x0 - pad, 0)
@@ -194,7 +191,7 @@ def preprocess(img_array):
         cropped = cleaned
 
     h, w = cropped.shape
-    size = max(h, w) + 8
+    size = max(h, w) + 10
     square = np.zeros((size, size), dtype=np.uint8)
     y_off = (size - h) // 2
     x_off = (size - w) // 2
@@ -209,16 +206,7 @@ def preprocess(img_array):
         matrix = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
         square = cv2.warpAffine(square, matrix, (size, size), borderValue=0)
 
-    target = 20
-    scale = target / max(square.shape)
-    new_w = max(1, int(square.shape[1] * scale))
-    new_h = max(1, int(square.shape[0] * scale))
-    resized = cv2.resize(square, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    final = np.zeros((28, 28), dtype=np.uint8)
-    x_off = (28 - new_w) // 2
-    y_off = (28 - new_h) // 2
-    final[y_off:y_off + new_h, x_off:x_off + new_w] = resized
-
+    final = cv2.resize(square, (28, 28), interpolation=cv2.INTER_AREA)
     input_tensor = final.astype("float32") / 255.0
     input_tensor = input_tensor.reshape(1, 28, 28, 1)
 
