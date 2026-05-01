@@ -4,6 +4,7 @@ import cv2
 from tensorflow.keras.models import load_model
 from PIL import Image
 import os
+import sys
 
 # ── Page Config ───────────────────────────────────────────
 st.set_page_config(
@@ -51,6 +52,9 @@ def preprocess(img_array):
 st.title("🔥 Digit + Alphabet Recognizer")
 st.markdown("### Recognizes handwritten **0–9** and **A–Z** using a CNN model")
 st.markdown("---")
+
+with st.expander("🛠 Runtime info"):
+    st.write(f"Python: {sys.version.split()[0]}")
 
 # ── Tabs: Upload OR Camera ────────────────────────────────
 tab1, tab2 = st.tabs(["📁 Upload Image", "📷 Use Camera"])
